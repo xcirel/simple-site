@@ -1,0 +1,80 @@
+definitions:
+  services:
+    docker:
+      memory: 1024
+    docker-with-more-memory:
+      memory: 2048
+      type: docker
+    docker-with-large-memory:
+      memory: 5120
+      type: docker
+image: docker:latest
+options:
+  docker: true
+pipelines:
+  pull-requests:
+    '**': #this runs as default for any branch not elsewhere defined
+      - step:
+         name: LINT and TEST
+         script:
+          - echo $BITBUCKET_COMMIT
+  branches:
+    develop:
+        - step:
+            name: Build Docker and deploy ECR CENTRAL
+            image: tstrohmeier/awscli:3.8.3
+            services: [docker-with-more-memory]
+            script:
+              - eval $(aws ecr get-login --region ${AWS_DEFAULT_REGION} --no-include-email)
+              - export BUILD_ID=$BITBUCKET_COMMIT          
+              - docker build -t ${AWS_REGISTRY_URL}:$BUILD_ID .
+              - docker push ${AWS_REGISTRY_URL}:$BUILD_ID
+              - docker tag ${AWS_REGISTRY_URL}:$BUILD_ID ${AWS_REGISTRY_URL}:backup
+              - docker tag ${AWS_REGISTRY_URL}:$BUILD_ID ${AWS_REGISTRY_URL}:dev
+              - docker push ${AWS_REGISTRY_URL}:dev
+              - docker push ${AWS_REGISTRY_URL}:backup                                        
+    stage:
+        - step:
+            name: Tag for STAGE
+            image: tstrohmeier/awscli:3.8.3
+            services: [docker-with-more-memory]
+            script:
+              - eval $(aws ecr get-login --region ${AWS_DEFAULT_REGION} --no-include-email)
+              - docker pull ${AWS_REGISTRY_URL}:dev
+              - docker tag ${AWS_REGISTRY_URL}:dev ${AWS_REGISTRY_URL}:stage
+              - docker push ${AWS_REGISTRY_URL}:stage
+        - step:
+            name: Revert commit
+            image: atlassian/default-image:3
+            services: [docker-with-more-memory]
+            script:
+              - eval $(aws ecr get-login --region ${AWS_DEFAULT_REGION} --no-include-email)
+              - export backup=$(aws ecr describe-images --repository-name simple-site --query 'reverse(sort_by(imageDetails,& imagePushedAt))[1].imageTags[0]' --output text)
+              - echo $backup
+              - docker pull $({AWS_REGISTRY_URL}:$backup)
+              - docker tag $({AWS_REGISTRY_URL}:$backup) ${AWS_REGISTRY_URL}:stage
+              - docker push ${AWS_REGISTRY_URL}:stage
+            trigger: manual               
+    prod:
+        - step:
+            name: Tag for PRODUCTION
+            image: tstrohmeier/awscli:3.8.3
+            services: [docker-with-more-memory]
+            script:
+              - eval $(aws ecr get-login --region ${AWS_DEFAULT_REGION} --no-include-email)
+              - docker pull ${AWS_REGISTRY_URL}:stage      
+              - docker tag ${AWS_REGISTRY_URL}:stage ${AWS_REGISTRY_URL}:prod
+              - docker push ${AWS_REGISTRY_URL}:prod
+        - step:
+            name: Revert commit
+            image: tstrohmeier/awscli:3.8.3
+            services: [docker-with-more-memory]
+            script:
+              - eval $(aws ecr get-login --region ${AWS_DEFAULT_REGION} --no-include-email)
+              - export backup=$(aws ecr describe-images --repository-name simple-site --query 'reverse(sort_by(imageDetails,& imagePushedAt))[1].imageTags[0]' --output text)
+              - echo $backup
+              - docker pull $({AWS_REGISTRY_URL}:$backup)
+              - docker tag $({AWS_REGISTRY_URL}:$backup) ${AWS_REGISTRY_URL}:prod
+              - docker push ${AWS_REGISTRY_URL}:prod
+            trigger: manual  
+               
