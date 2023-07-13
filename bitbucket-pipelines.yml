@@ -49,9 +49,9 @@ pipelines:
             services: [docker-with-more-memory]
             script:
               - eval $(aws ecr get-login --region ${AWS_DEFAULT_REGION} --no-include-email)
-              - export backup=$(aws ecr describe-images --repository-name simple-site --query 'reverse(sort_by(imageDetails,& imagePushedAt))[1].imageTags[0]' --output text)
+              - backup=$(aws ecr describe-images --repository-name simple-site --query 'reverse(sort_by(imageDetails,& imagePushedAt))[1].imageTags[0]' --output text)
               - echo $backup
-              - docker pull $({AWS_REGISTRY_URL}:$backup)
+              - docker pull ${AWS_REGISTRY_URL}:$backup
               - docker tag $({AWS_REGISTRY_URL}:$backup) ${AWS_REGISTRY_URL}:stage
               - docker push ${AWS_REGISTRY_URL}:stage
             trigger: manual               
